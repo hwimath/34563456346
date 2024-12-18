@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>휘매쓰 연산 챌린지!</title>
+<style>
+  body {
+    font-family: 'Arial', sans-serif;
+    margin: 20px;
+    background: #f0f0f0;
+  }
+  h1 {
+    text-align: center;
+    color: #333;
+  }
+  .center {
+    text-align:center;
+  }
+  .hidden {
+    display: none;
+  }
+  .difficulty-btn {
+    padding: 10px 20px;
+    margin: 10px;
+    font-size:16px;
+    cursor: pointer;
+  }
+  #game-container {
+    max-width: 700px;
+    margin: 0 auto;
+    background: #fff;
+    padding:20px;
+    border-radius:10px;
+    box-shadow:0 0 10px rgba(0,0,0,0.1);
+  }
+  .status-bar {
+    display:flex;
+    justify-content: space-between;
+    align-items:center;
+    margin-bottom:10px;
+    flex-wrap: wrap;
+  }
+  #energy-bar-container {
+    flex:1; 
+    height:20px; 
+    background:#ccc;
+    border-radius:10px; 
+    margin:0 10px;
+    position:relative; 
+    overflow:hidden;
+  }
+  #energy-bar {
+    position:absolute;
+    top:0; left:0;
+    height:100%;
+    background:#76c7c0;
+    width:100%;
+    transition: width 1s linear;
+  }
+  .question-container {
+    margin:20px 0;
+    font-size:18px;
+    font-weight:bold;
+  }
+  .answers {
+    margin-top:10px;
+  }
+  .answer-btn {
+    display:block;
+    margin:5px 0;
+    padding:10px;
+    background:#eee;
+    border:none;
+    border-radius:5px;
+    cursor:pointer;
+    text-align:left;
+    font-size:16px;
+  }
+  .answer-btn:hover {
+    background:#ddd;
+  }
+  #score, #lives, #total-time {
+    font-weight:bold;
+  }
+  #wrong-answer {
+    color:red;
+    font-weight:bold;
+    margin-top:10px;
+  }
+  #final-message {
+    font-size:20px;
+    font-weight:bold;
+    color:#333;
+    text-align:center;
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+<script>
+// 난이도, 시간제한, 점수 설정
+var difficulty = null;
+var timeLimit = 0;
+var scorePerQuestion = 0;
+var lives = 3;
+var score = 0;
+var totalTime = 0;
+var intervalId = null;
+var energyIntervalId = null;
+var energyTime = 0; 
+var currentIndex = 0;
+
+// 문제 데이터 생성
+// 분모: 2,3,4,5,6,7
+// 각 분모마다 분자 1~10, c는 (2,3,4,5) 순환
+// 결과 기약분수로
+// 보기: 정답 외 3개 오답(분자나 분모 ±1) 단순생성
+
+function gcd(x,y){
+  x=Math.abs(x);y=Math.abs(y);
+  while(y!==0){var t=x%y;x=y;y=t;}
+  return x;
+}
+
+function simplify(num,den){
+  var g=gcd(num,den);
+  return [num/g, den/g];
+}
+
+function makeChoices(correctNum, correctDen){
+  // 정답: correctNum/correctDen
+  // 오답: 분자±1, 분모±1 등 단순 변형
+  // 중복 회피를 위해 집합 사용
+  var choices = new Set();
+  var correctStr = "\\(\\frac{" + correctNum + "}{" + correctDen + "}\\)";
+  choices.add(correctStr);
+
+  function addWrongChoice(nu,de){
+    if(de===0) return;
+    var ws="\\(\\frac{" + nu + "}{" + de + "}\\)";
+    if(ws!==correctStr && !choices.has(ws)) choices.add(ws);
+  }
+
+  // 간단히 분자±1, 분모±1 조합
+  addWrongChoice(correctNum+1, correctDen);
+  addWrongChoice(correctNum, correctDen+1);
+  addWrongChoice(correctNum-1, correctDen);
+  addWrongChoice(correctNum, correctDen-1);
+
+  // 만약 여전히 4개 미만이면 추가 시도
+  if(choices.size<4){
+    addWrongChoice(correctNum+2, correctDen);
+    addWrongChoice(correctNum, correctDen+2);
+  }
+
+  // Set -> Array
+  return Array.from(choices);
+}
+
+// 문제 60개 생성
+var denominators=[2,3,4,5,6,7];
+var problems=[];
+for(var di=0;di<denominators.length;di++){
+  var d=denominators[di];
+  for(var n=1;n<=10;n++){
+    var c = 2+((n-1)%4); // 2,3,4,5 순환
+    // (n/d) ÷ c = n/d * 1/c = n/(d*c)
+    var num=n; var den=d*c;
+    var simp=simplify(num,den);
+    var sn=simp[0]; var sd=simp[1];
+    var q="\\(\\frac{"+n+"}{"+d+"}\\div"+c+"=?\\)";
+    var ch=makeChoices(sn,sd);
+    // 정답은 sn/sd
+    var ans="\\(\\frac{"+sn+"}{"+sd+"}\\)";
+    // 보기 배열에 정답 포함되어있고, makeChoices에서 4개 이상 확보됨
+    // 여기서 4개만 뽑기
+    ch=ch.slice(0,4);
+
+    problems.push({
+      q:q,
+      choices:ch,
+      answer:ans
+    });
+  }
+}
+
+// 배열 셔플
+function shuffle(array){
+  for(let i=array.length-1;i>0;i--){
+    let j=Math.floor(Math.random()*(i+1));
+    [array[i], array[j]]=[array[j], array[i]];
+  }
+  return array;
+}
+
+// 난이도 선택 후 시작
+function startGame(selectedDiff){
+  difficulty = selectedDiff;
+  if(difficulty==="최상"){
+    timeLimit=20;
+    scorePerQuestion=20;
+  } else if(difficulty==="상"){
+    timeLimit=30;
+    scorePerQuestion=15;
+  } else if(difficulty==="중"){
+    timeLimit=40;
+    scorePerQuestion=13;
+  } else {
+    timeLimit=9999999; // 사실상 무제한
+    scorePerQuestion=10;
+  }
+
+  document.getElementById("difficulty-screen").classList.add("hidden");
+  document.getElementById("game-screen").classList.remove("hidden");
+
+  shuffle(problems);
+  updateStatus();
+  startTotalTimer();
+  showProblem();
+}
+
+function showProblem(){
+  if(currentIndex>=problems.length){
+    currentIndex=0;
+    shuffle(problems);
+  }
+  var problem = problems[currentIndex];
+  var container = document.getElementById("question-container");
+  container.innerHTML = "";
+
+  var qDiv = document.createElement("div");
+  qDiv.className="question-container";
+  qDiv.innerHTML="<div>문제: "+problem.q+"</div>";
+  container.appendChild(qDiv);
+
+  var ansDiv = document.createElement("div");
+  ansDiv.className = "answers";
+
+  var ch = problem.choices.slice();
+  shuffle(ch);
+  for(var i=0;i<ch.length;i++){
+    let btn = document.createElement("button");
+    btn.className="answer-btn";
+    btn.innerHTML=ch[i];
+    btn.onclick=(function(choice){
+      return function(){checkAnswer(choice, problem.answer);}
+    })(ch[i]);
+    ansDiv.appendChild(btn);
+  }
+
+  container.appendChild(ansDiv);
+  MathJax.typesetPromise();
+
+  startEnergyBar();
+}
+
+function startEnergyBar(){
+  clearInterval(energyIntervalId);
+  var bar = document.getElementById("energy-bar");
+  if(difficulty==="하"){
+    // 시간무제한
+    bar.style.width="100%";
+    return;
+  }
+  var startTime = timeLimit;
+  energyTime = startTime;
+  function decreaseEnergy(){
+    energyTime--;
+    var percent=(energyTime/startTime)*100;
+    bar.style.width=percent+"%";
+    if(energyTime<=0){
+      clearInterval(energyIntervalId);
+      lives--;
+      updateStatus();
+      nextProblem(false,true);
+    }
+  }
+  decreaseEnergy();
+  energyIntervalId=setInterval(decreaseEnergy,1000);
+}
+
+function checkAnswer(selected, correct){
+  clearInterval(energyIntervalId);
+  var container = document.getElementById("question-container");
+  if(selected===correct){
+    // 정답
+    score+=scorePerQuestion;
+    updateStatus();
+    nextProblem(true,false);
+  } else {
+    // 오답
+    lives--;
+    updateStatus();
+    var cDiv=document.createElement("div");
+    cDiv.id="wrong-answer";
+    cDiv.innerHTML="틀렸습니다! 정답: "+correct;
+    container.appendChild(cDiv);
+    MathJax.typesetPromise();
+    setTimeout(function(){
+      nextProblem(false,false);
+    },2000);
+  }
+}
+
+function nextProblem(correct,timeOut){
+  if(lives<=0){
+    endGame();
+    return;
+  }
+  currentIndex++;
+  showProblem();
+}
+
+function updateStatus(){
+  document.getElementById("score").textContent=score;
+  document.getElementById("lives").textContent=lives;
+}
+
+function startTotalTimer(){
+  intervalId=setInterval(function(){
+    totalTime++;
+    document.getElementById("total-time").textContent=totalTime+"초";
+  },1000);
+}
+
+function endGame(){
+  clearInterval(intervalId);
+  clearInterval(energyIntervalId);
+  var container = document.getElementById("question-container");
+  container.innerHTML="<div id='final-message'>게임 종료! 점수: "+score+"</div>";
+}
+</script>
+</head>
+<body>
+<h1>"휘매쓰 연산 챌린지!"</h1>
+
+<div id="difficulty-screen" class="center">
+  <p>난이도를 선택하세요.</p>
+  <button class="difficulty-btn" onclick="startGame('최상')">최상(20초, 문제당 20점)</button>
+  <button class="difficulty-btn" onclick="startGame('상')">상(30초, 문제당 15점)</button>
+  <button class="difficulty-btn" onclick="startGame('중')">중(40초, 문제당 13점)</button>
+  <button class="difficulty-btn" onclick="startGame('하')">하(시간무제한, 문제당 10점)</button>
+</div>
+
+<div id="game-screen" class="hidden">
+  <div class="status-bar">
+    <div>점수: <span id="score">0</span></div>
+    <div>남은 기회: <span id="lives">3</span></div>
+    <div id="energy-bar-container"><div id="energy-bar"></div></div>
+    <div>총 경과 시간: <span id="total-time">0초</span></div>
+  </div>
+  <div id="game-container">
+    <div id="question-container"></div>
+  </div>
+</div>
+
+</body>
+</html>
